@@ -218,3 +218,45 @@ func TestRenewalSkipsValidTokenAndRejectsRedirect(t *testing.T) {
 		t.Fatal("redirect was followed")
 	}
 }
+
+func TestRevokeOwnedSessions(t *testing.T) {
+	c := testConfig(t, "http://127.0.0.1:1")
+	if err := writeState(c.StateDir, state{Current: testSession("current"), Retired: []retiredSession{{ID: "previous-id", ExpiresAt: time.Now()}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(c.StateDir, "renew.lock"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	cli := filepath.Join(t.TempDir(), "t3")
+	c.T3Binary = cli
+	if err := os.WriteFile(cli, []byte("#!/bin/sh\nexit 1\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := revokeOwned(context.Background(), c); err == nil {
+		t.Fatal("expected failed revocation")
+	}
+	if _, err := readState(c.StateDir); err != nil {
+		t.Fatal("lost state on failed revocation")
+	}
+	logPath := filepath.Join(t.TempDir(), "calls")
+	t.Setenv("T3_TEST_LOG", logPath)
+	if err := os.WriteFile(cli, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$T3_TEST_LOG\"\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := revokeOwned(context.Background(), c); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(c.StateDir, "session.json")); !os.IsNotExist(err) {
+		t.Fatal("token state was not removed")
+	}
+	calls, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(calls) != "auth\nsession\nrevoke\ncurrent-id\nauth\nsession\nrevoke\nprevious-id\n" {
+		t.Fatal("unexpected sessions revoked")
+	}
+	if err := revokeOwned(context.Background(), c); err != nil {
+		t.Fatal("repeat cleanup failed", err)
+	}
+}

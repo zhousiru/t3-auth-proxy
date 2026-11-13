@@ -74,7 +74,7 @@ func run(args []string) error {
 	force := f.Bool("force", false, "issue a new token even if renewal is not due")
 	showVersion := f.Bool("version", false, "print version")
 	f.Usage = func() {
-		fmt.Fprintln(f.Output(), "Usage: t3-auth-proxy [options] serve|ensure-token|status")
+		fmt.Fprintln(f.Output(), "Usage: t3-auth-proxy [options] serve|ensure-token|status|revoke")
 		f.PrintDefaults()
 	}
 	if err := f.Parse(args); err != nil {
@@ -102,6 +102,8 @@ func run(args []string) error {
 		return ensureToken(ctx, c, *force)
 	case "serve":
 		return serve(ctx, c)
+	case "revoke":
+		return revokeOwned(ctx, c)
 	case "status":
 		s, err := readState(c.StateDir)
 		if err != nil {
@@ -390,6 +392,44 @@ func newProxy(c config, s session) *proxy {
 
 func isT3Cookie(name string) bool {
 	return name == "t3_session" || strings.HasPrefix(name, "t3_session_")
+}
+
+// Run after stopping the proxy and renewal timer. Only locally tracked sessions
+// are revoked; other clients and T3 data are untouched.
+func revokeOwned(ctx context.Context, c config) error {
+	lock, err := os.OpenFile(filepath.Join(c.StateDir, "renew.lock"), os.O_RDWR, 0600)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+	if err = syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		return errors.New("token renewal is already running")
+	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	s, err := readState(c.StateDir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	ids := []string{s.Current.ID}
+	for _, old := range s.Retired {
+		ids = append(ids, old.ID)
+	}
+	for _, id := range ids {
+		if _, err = t3Command(ctx, c, "auth", "session", "revoke", id); err != nil {
+			return err
+		}
+	}
+	if err = os.Remove(filepath.Join(c.StateDir, "session.json")); err != nil {
+		return err
+	}
+	log.Print("revoked proxy sessions and removed token state")
+	return nil
 }
 
 func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {

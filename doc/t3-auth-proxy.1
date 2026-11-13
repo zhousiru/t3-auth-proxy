@@ -3,7 +3,7 @@
 t3-auth-proxy \- manage a shared T3 Code session behind an SSO gateway
 .SH SYNOPSIS
 .B t3-auth-proxy
-[\fB-config\fR FILE] [\fB-force\fR] serve|ensure-token|status
+[\fB-config\fR FILE] [\fB-force\fR] serve|ensure-token|status|revoke
 .br
 .B t3-auth-proxy -version
 .SH DESCRIPTION
@@ -32,6 +32,11 @@ until expiry; expired sessions tracked by this program are revoked on rotation.
 .TP
 .B status
 Print version, session ID, expiry and authentication status as JSON, never the token.
+.TP
+.B revoke
+After stopping the proxy and renewal timer, revoke all sessions recorded in this
+instance's state file and remove session.json. Other T3 sessions and application
+data are untouched. This is safe to run again if cleanup was interrupted.
 .SH CONFIGURATION
 The default configuration is /etc/t3-auth-proxy.conf, in JSON format.
 An example is installed alongside it; installation never overwrites configuration.
@@ -105,5 +110,23 @@ and gateway target. Revoke the proxy's sessions when retiring the deployment.
 /var/lib/t3-auth-proxy-USER/session.json
 .br
 /usr/local/lib/systemd/system/t3-auth-proxy*.service
+.SH UNINSTALLATION
+Stop the proxy and renewal units before removing the program:
+.PP
+.nf
+systemctl disable --now t3-auth-proxy-renew@USER.timer
+systemctl stop t3-auth-proxy-renew@USER.service
+systemctl disable --now t3-auth-proxy@USER.service
+sudo -u USER env STATE_DIRECTORY=/var/lib/t3-auth-proxy-USER \
+    /usr/local/bin/t3-auth-proxy revoke
+make uninstall
+systemctl daemon-reload
+.fi
+.PP
+Run make uninstall as root from the source or extracted release directory.
+It removes only the installed binary, manual, example configuration and units.
+It preserves /etc/t3-auth-proxy.conf and the state directory; remove those
+explicitly if no longer needed. Restore the previous T3 listener and gateway
+target to return to native pairing. T3 projects and conversations are unaffected.
 .SH EXIT STATUS
 Zero on success; one on configuration, issuance or runtime failure.
