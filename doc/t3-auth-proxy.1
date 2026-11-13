@@ -1,0 +1,109 @@
+.TH T3-AUTH-PROXY 1
+.SH NAME
+t3-auth-proxy \- manage a shared T3 Code session behind an SSO gateway
+.SH SYNOPSIS
+.B t3-auth-proxy
+[\fB-config\fR FILE] [\fB-force\fR] serve|ensure-token|status
+.br
+.B t3-auth-proxy -version
+.SH DESCRIPTION
+The proxy authenticates upstream requests with a T3 Code bearer session issued
+by the local t3 CLI. HTTP, streamed responses and WebSocket upgrades are forwarded
+using Go's standard reverse proxy. This program does not implement an SSO login.
+Only trusted ingress addresses may reach it; every allowed peer must enforce
+authentication before forwarding requests. Do not expose its port directly.
+.PP
+All clients share one T3 identity and its default full-access permissions.
+Revoke user access at the SSO gateway. Existing WebSockets are not automatically
+closed when a gateway login is revoked. Local users who can reach an allowed
+loopback listener also have access.
+.SH COMMANDS
+.TP
+.B serve
+Validate or issue a session, then listen. Reload the state file every two seconds.
+An expired token fails closed with HTTP 503. Upstream failures return HTTP 502.
+.TP
+.B ensure-token
+Check the current session against T3. Issue and validate a replacement when
+revoked, expired or inside the renewal window. The -force option rotates early.
+Writes are atomic and a file lock prevents concurrent issuance. A failed
+candidate leaves the previous token intact. Retired sessions remain usable
+until expiry; expired sessions tracked by this program are revoked on rotation.
+.TP
+.B status
+Print version, session ID, expiry and authentication status as JSON, never the token.
+.SH CONFIGURATION
+The default configuration is /etc/t3-auth-proxy.conf, in JSON format.
+An example is installed alongside it; installation never overwrites configuration.
+.TP
+.B listen
+Listener address. Default: 127.0.0.1:3773.
+.TP
+.B upstream
+T3 HTTP origin. Default: http://127.0.0.1:3774. Keep this listener private.
+.TP
+.B public_url
+Required public HTTP(S) origin. Used for Host, forwarded headers and Origin checks.
+Requests carrying a different Origin are rejected.
+.TP
+.B trusted_peers
+CIDRs allowed to reach the proxy. Defaults to IPv4 and IPv6 loopback.
+Set these to the actual gateway or tunnel connector addresses, not client addresses.
+.TP
+.B t3_binary, t3_home
+The t3 executable (default: t3 on PATH) and optional T3 home passed as --base-dir.
+Use an absolute executable path for systemd.
+.TP
+.B state_dir
+State directory. Defaults to STATE_DIRECTORY from systemd, otherwise
+/var/lib/t3-auth-proxy. Contains session.json and renew.lock. Keep it private.
+.TP
+.B token_ttl, renew_before
+Go duration strings. Defaults: 720h (30 days) and 168h (7 days).
+The CLI's pairing-code lifetime is unrelated to these settings.
+.TP
+.B subject
+Label and subject for sessions created by this proxy. Default: t3-auth-proxy.
+.SH INSTALLATION
+Install the release binary, man page and systemd units with make install.
+Create /etc/t3-auth-proxy.conf from the example and configure T3 to listen on
+the private upstream address. Use the same Linux user as the T3 installation:
+.PP
+.nf
+systemctl daemon-reload
+systemctl enable --now t3-auth-proxy@USER.service
+systemctl enable --now t3-auth-proxy-renew@USER.timer
+.fi
+.PP
+The units create /var/lib/t3-auth-proxy-USER with owner-only access. The T3
+daemon must already be configured to start at boot. The proxy retries startup
+if T3 is not ready. Do not run multiple proxy instances with the same config.
+.SH OPERATIONS
+Use systemctl status and journalctl -u t3-auth-proxy@USER.service for service logs.
+Run status as USER with STATE_DIRECTORY set to the unit's state directory.
+Run the renew service manually to check credentials immediately.
+.PP
+Rotation changes new requests without restarting T3 or the proxy. Existing
+sockets retain their old session and may reconnect when it expires. The proxy
+does not replay failed requests, especially writes. If the gateway login expires,
+sign in again at the gateway.
+.PP
+T3 session cookies, DPoP headers and wsTicket/dpop query credentials are removed
+before forwarding so stale browser credentials cannot override the shared token.
+Other cookies and query parameters are preserved. The proxy does not store or
+log request bodies or authentication tokens. Tested against T3 Code 0.1.9.
+.SH UPGRADES
+Install a new release binary and restart the proxy. Preserve its configuration
+and state directory. Test HTTP, WebSockets and token issuance after T3 upgrades.
+To revert to native pairing, stop the proxy and restore the previous T3 listener
+and gateway target. Revoke the proxy's sessions when retiring the deployment.
+.SH FILES
+/usr/local/bin/t3-auth-proxy
+.br
+/etc/t3-auth-proxy.conf
+.br
+/var/lib/t3-auth-proxy-USER/session.json
+.br
+/usr/local/lib/systemd/system/t3-auth-proxy*.service
+.SH EXIT STATUS
+Zero on success; one on configuration, issuance or runtime failure.

@@ -1,0 +1,11 @@
+[Unit]
+Description=Renew the T3 Code proxy session for %i
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=%i
+StateDirectory=t3-auth-proxy-%i
+StateDirectoryMode=0700
+UMask=0077
+ExecStart=/usr/local/bin/t3-auth-proxy ensure-token

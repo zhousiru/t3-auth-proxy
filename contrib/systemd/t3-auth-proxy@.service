@@ -1,0 +1,17 @@
+[Unit]
+Description=T3 Code SSO reverse proxy for %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%i
+StateDirectory=t3-auth-proxy-%i
+StateDirectoryMode=0700
+UMask=0077
+ExecStart=/usr/local/bin/t3-auth-proxy serve
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

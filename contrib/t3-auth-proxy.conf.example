@@ -1,0 +1,11 @@
+{
+  "listen": "127.0.0.1:3773",
+  "upstream": "http://127.0.0.1:3774",
+  "public_url": "https://code.example.com",
+  "trusted_peers": ["127.0.0.1/32", "::1/128"],
+  "t3_binary": "/home/alice/.local/bin/t3",
+  "t3_home": "/home/alice/.t3",
+  "token_ttl": "720h",
+  "renew_before": "168h",
+  "subject": "t3-auth-proxy"
+}

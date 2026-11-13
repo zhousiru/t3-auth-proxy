@@ -1,0 +1,10 @@
+[Unit]
+Description=Check the T3 Code proxy session hourly for %i
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1h
+RandomizedDelaySec=1min
+
+[Install]
+WantedBy=timers.target
